@@ -23,6 +23,8 @@ const CATEGORY_COLORS = {
 // DOM Elements
 const feedContainer = document.getElementById('feed-container');
 const btnRefresh = document.getElementById('btn-refresh');
+const btnExportCsv = document.getElementById('btn-export-csv');
+const themeCheckbox = document.getElementById('checkbox');
 const searchInput = document.getElementById('search-input');
 const btnClearSearch = document.getElementById('btn-clear-search');
 const categoryPillsContainer = document.getElementById('category-pills');
@@ -50,9 +52,21 @@ const toastMessage = document.getElementById('toast-message');
 
 // Initialize the Application
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
     fetchReleases();
     setupEventListeners();
 });
+
+// Initialize Theme
+function initTheme() {
+    const currentTheme = localStorage.getItem('theme') || 'dark';
+    if (currentTheme === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+        if (themeCheckbox) {
+            themeCheckbox.checked = true;
+        }
+    }
+}
 
 // Setup event listeners
 function setupEventListeners() {
@@ -121,6 +135,24 @@ function setupEventListeners() {
         const twitterUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
         window.open(twitterUrl, '_blank', 'noopener,noreferrer');
         showToast('Redirecting to Twitter/X...');
+    });
+
+    // Export to CSV button click
+    btnExportCsv.addEventListener('click', () => {
+        exportToCSV();
+    });
+
+    // Theme Toggle Switch checkbox change
+    themeCheckbox.addEventListener('change', (e) => {
+        if (e.target.checked) {
+            document.documentElement.setAttribute('data-theme', 'light');
+            localStorage.setItem('theme', 'light');
+            showToast('Switched to light theme');
+        } else {
+            document.documentElement.removeAttribute('data-theme');
+            localStorage.setItem('theme', 'dark');
+            showToast('Switched to dark theme');
+        }
     });
 }
 
@@ -242,6 +274,13 @@ function renderFeed() {
                     </svg>
                 </a>
                 <div class="card-tweet-actions">
+                    <button class="btn btn-card-copy" title="Copy Content to Clipboard">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        <span>Copy</span>
+                    </button>
                     <button class="btn btn-card-tweet" title="Draft Tweet">
                         <svg viewBox="0 0 24 24">
                             <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
@@ -255,6 +294,23 @@ function renderFeed() {
         // Select card on click
         card.addEventListener('click', () => {
             selectCard(update.id);
+        });
+
+        // Connect copy button click
+        const copyBtn = card.querySelector('.btn-card-copy');
+        copyBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            navigator.clipboard.writeText(update.text).then(() => {
+                showToast('Copied to clipboard!');
+                const origText = copyBtn.querySelector('span').textContent;
+                copyBtn.querySelector('span').textContent = 'Copied!';
+                setTimeout(() => {
+                    copyBtn.querySelector('span').textContent = origText;
+                }, 1500);
+            }).catch(err => {
+                console.error('Failed to copy: ', err);
+                showToast('Failed to copy content.', true);
+            });
         });
         
         // Connect tweet button click (same as card select)
@@ -455,4 +511,49 @@ function showToast(message, isError = false) {
     toastTimeout = setTimeout(() => {
         toastElement.classList.add('hidden');
     }, 4000);
+}
+
+// Export the current filtered list of updates to CSV
+function exportToCSV() {
+    const dataToExport = state.filteredUpdates.length > 0 ? state.filteredUpdates : state.updates;
+    if (dataToExport.length === 0) {
+        showToast('No updates to export.', true);
+        return;
+    }
+    
+    const headers = ['ID', 'Date', 'ISO Date', 'Category', 'Text Content', 'Documentation Link'];
+    
+    const escapeCSV = (text) => {
+        if (text === null || text === undefined) return '';
+        const stringified = String(text);
+        if (stringified.includes('"') || stringified.includes(',') || stringified.includes('\n') || stringified.includes('\r')) {
+            return `"${stringified.replace(/"/g, '""')}"`;
+        }
+        return stringified;
+    };
+    
+    const rows = dataToExport.map(update => [
+        update.id,
+        update.date,
+        update.iso_date,
+        update.category,
+        update.text,
+        update.link
+    ].map(escapeCSV).join(','));
+    
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    
+    const dateStr = new Date().toISOString().split('T')[0].replace(/-/g, '_');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `bq_releases_${state.activeCategory}_${dateStr}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showToast(`Exported ${dataToExport.length} items to CSV!`);
 }
